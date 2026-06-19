@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/admin.css">
+  <title>Dashboard - {{ tenant.name }}</title>
+</head>
+<body>
+  <main class="container">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">MVP WhatsApp Bot</p>
+        <h1>{{ tenant.name }}</h1>
+        <p>{{ tenant.segment }} · {{ tenant.timezone }}</p>
+      </div>
+      <a class="button" href="/api/v1/analytics/summary?admin_token={{ token }}">API Analytics</a>
+    </header>
+
+    <section class="grid cards">
+      <article><strong>{{ summary.messages.inbound }}</strong><span>Mensagens recebidas</span></article>
+      <article><strong>{{ summary.messages.outbound }}</strong><span>Mensagens enviadas</span></article>
+      <article><strong>{{ summary.open_conversations }}</strong><span>Conversas abertas</span></article>
+      <article><strong>{{ summary.open_tickets }}</strong><span>Tickets abertos</span></article>
+    </section>
+
+    <section class="grid two">
+      <div class="panel">
+        <h2>Conversas recentes</h2>
+        {% for c in conversations %}
+          <a class="row" href="/admin/conversations/{{ c.id }}?token={{ token }}">
+            <span>{{ c.contact.name or c.contact.wa_id }}</span>
+            <small>{{ c.status }} · bot {{ 'pausado' if c.bot_paused else 'ativo' }}</small>
+          </a>
+        {% else %}
+          <p>Nenhuma conversa ainda.</p>
+        {% endfor %}
+      </div>
+      <div class="panel">
+        <h2>Tickets abertos</h2>
+        {% for t in tickets %}
+          <div class="row"><span>{{ t.subject }}</span><small>{{ t.priority }} · {{ t.created_at }}</small></div>
+        {% else %}<p>Nenhum ticket aberto.</p>{% endfor %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Agendamentos solicitados</h2>
+      {% for b in bookings %}
+        <div class="row"><span>{{ b.notes }}</span><small>{{ b.status }} · protocolo {{ b.id[:8] }}</small></div>
+      {% else %}<p>Nenhum agendamento solicitado.</p>{% endfor %}
+    </section>
+  </main>
+</body>
+</html>

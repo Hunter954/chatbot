@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/admin.css">
+  <title>Conversa</title>
+</head>
+<body>
+  <main class="container narrow">
+    <a href="/admin?token={{ token }}">← Voltar</a>
+    <h1>{{ conversation.contact.name or conversation.contact.wa_id }}</h1>
+    <p>Status: {{ conversation.status }} · Bot: {{ 'pausado' if conversation.bot_paused else 'ativo' }}</p>
+    <section class="chat">
+      {% for m in messages %}
+        <div class="bubble {{ m.direction }}">
+          <small>{{ m.direction }} · {{ m.created_at }}</small>
+          <p>{{ m.body }}</p>
+        </div>
+      {% endfor %}
+    </section>
+  </main>
+</body>
+</html>
