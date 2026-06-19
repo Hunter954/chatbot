@@ -4,10 +4,20 @@
 #
 # Importante para Railway:
 # - Monte um Volume em /data para persistir a sessão do WhatsApp.
-# - O WORKDIR /data faz o OpenWA salvar ./_IGNORE_<session> dentro do volume.
+# - Rodamos como root porque volumes do Railway podem ser montados sem permissão
+#   de escrita para o usuário padrão da imagem OpenWA.
+# - O arquivo de config fica fora do volume para evitar erro de permissão.
 FROM openwa/wa-automate
 
+USER root
 WORKDIR /data
-ENTRYPOINT []
 
-CMD ["sh", "-c", "printf '{}' > /data/cli.config.json && npx @open-wa/wa-automate@4.76.0 --config cli.config.json -p ${PORT:-8080} -k \"${OPENWA_API_KEY}\" --session-id \"${OPENWA_SESSION_ID:-default}\" --api-host \"${OPENWA_PUBLIC_URL}\" --host \"${OPENWA_PUBLIC_URL}\" -w \"${FLASK_WEBHOOK_URL}?token=${OPENWA_WEBHOOK_SECRET}\" --keep-alive --skip-save-postman-collection"]
+RUN mkdir -p /data /app/config \
+    && printf '{}' > /app/config/cli.config.json \
+    && chmod 644 /app/config/cli.config.json
+
+COPY openwa-service/start-openwa.sh /app/start-openwa.sh
+RUN chmod +x /app/start-openwa.sh
+
+ENTRYPOINT []
+CMD ["/app/start-openwa.sh"]

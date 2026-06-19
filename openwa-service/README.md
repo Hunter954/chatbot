@@ -17,11 +17,26 @@ OPENWA_WEBHOOK_SECRET=o-mesmo-segredo-configurado-no-flask
 
 ## Volume obrigatório/recomendado
 
-Crie um **Volume no Railway montado em `/data`**.
+Crie um **Volume no Railway montado exatamente em `/data`**.
 
 O OpenWA salva a sessão em um diretório relativo como `./_IGNORE_lanhouse-demo`. Este Dockerfile usa `WORKDIR /data`, então esse diretório fica dentro do volume e não some quando o container reinicia ou faz redeploy.
 
 Sem volume, o WhatsApp pode pedir QR Code novamente a cada redeploy.
+
+## Correção de permissão no volume
+
+Em alguns deploys, o Railway monta o volume como `root-owned`, enquanto a imagem padrão do OpenWA pode executar com um usuário sem permissão de escrita. Isso gera erro como:
+
+```txt
+sh: 1: cannot create /data/cli.config.json: Permission denied
+```
+
+A correção aplicada aqui foi:
+
+- rodar o service OpenWA como `root`;
+- deixar o arquivo de config em `/app/config/cli.config.json`, fora do volume;
+- usar `/data` apenas para sessão e arquivos persistentes;
+- validar escrita em `/data` no início do container.
 
 ## Primeiro deploy
 
@@ -39,4 +54,4 @@ Alguns deploys do container mostram:
 Unable to read config file json: /config
 ```
 
-Este Dockerfile cria `/data/cli.config.json` com `{}` e inicia o OpenWA com `--config cli.config.json`, evitando o aviso e mantendo as configurações controladas por variáveis de ambiente.
+Este Dockerfile inicia o OpenWA com `--config /app/config/cli.config.json`, evitando depender de um arquivo `/config` inexistente ou de um arquivo dentro do volume.
