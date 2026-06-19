@@ -1,22 +1,7 @@
-FROM openwa/wa-automate:latest
+FROM node:22-bookworm-slim
 
-USER root
 WORKDIR /app
-
-ENV NODE_ENV=production \
-    PORT=8080 \
-    OPENWA_DATA_DIR=/data \
-    OPENWA_SESSION_DATA_PATH=/data/sessions \
-    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-
-# NÃO usar apt-get aqui.
-# A imagem base tem um repositório do Google Chrome com chave expirada/ausente,
-# e o apt-get update quebra o build no Railway.
-# Criamos um fallback mínimo para o binário `ps`, suficiente para evitar o crash
-# `spawn ps ENOENT` observado nos logs.
-RUN mkdir -p /usr/local/bin \
- && printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/ps \
- && chmod +x /usr/local/bin/ps
+ENV NODE_ENV=production
 
 COPY openwa-service/package.json /app/package.json
 RUN npm install --omit=dev --no-audit --no-fund \

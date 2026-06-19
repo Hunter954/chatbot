@@ -1,39 +1,42 @@
-# Troubleshooting OpenWA no Railway
+# Troubleshooting Railway — WhatsApp gateway
 
-## QR não aparece e `/qr-state` fica STARTING
+## QR não aparece no OpenWA v4
 
-Verifique os logs. Se aparecer:
+O problema observado nos logs foi:
 
 ```txt
-Using custom chromium args with multi device will cause issues! Please remove them
 TimeoutError: Waiting failed: 30000ms exceeded
 ```
 
-aplique este patch. Ele remove `browserArgs`/`chromiumArgs` do `create()` por padrão.
+O OpenWA carregava a página, passava por `Page loaded`, mas morria antes de emitir QR.
 
-## Build quebra por apt/GPG do Chrome
+A solução prática aplicada aqui foi trocar o runtime do `openwa-service` para um gateway compatível via Baileys, preservando as rotas usadas pelo Flask (`/sendText`, `/qr`, `/qr-state`, `/healthz`, `/readyz`).
 
-Não use `apt-get update` neste Dockerfile. A imagem base pode ter repositório do Google Chrome com chave expirada/ausente. O Dockerfile deste patch não usa apt.
+## Conferir estado
 
-## Sessão quebrada
+```txt
+https://SEU-SERVICE.up.railway.app/qr-state
+```
 
-Troque temporariamente `OPENWA_SESSION_ID` ou limpe via:
+Campos importantes:
+
+- `engine`: deve ser `baileys`.
+- `has_qr`: deve virar `true` quando o QR for gerado.
+- `connection_state`: `STARTING`, `READY`, `DISCONNECTED`, `LOGGED_OUT` ou `ERROR`.
+- `last_error`: erro detalhado, se existir.
+
+## Resetar sessão
 
 ```bash
-curl -X POST "https://SEU-OPENWA.up.railway.app/reset-session" \
+curl -X POST "https://SEU-SERVICE.up.railway.app/reset-session" \
   -H "X-API-KEY: SUA_OPENWA_API_KEY"
 ```
 
-## Volume
+## Testar envio
 
-O volume do Railway deve estar montado em:
-
-```txt
-/data
-```
-
-A sessão deve ficar em:
-
-```txt
-/data/sessions/_IGNORE_<OPENWA_SESSION_ID>
+```bash
+curl -X POST "https://SEU-SERVICE.up.railway.app/sendText" \
+  -H "Content-Type: application/json" \
+  -H "X-API-KEY: SUA_OPENWA_API_KEY" \
+  -d '{"args":["55DDDNUMERO@c.us","Teste"]}'
 ```

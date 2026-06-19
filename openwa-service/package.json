@@ -1,18 +1,19 @@
 {
-  "name": "openwa-programmatic-gateway",
+  "name": "openwa-compatible-baileys-gateway",
   "version": "1.0.0",
   "private": true,
-  "description": "Gateway OpenWA estável para Railway com QR próprio, healthcheck, webhook e endpoints compatíveis com o MVP Flask.",
-  "main": "server.js",
+  "type": "module",
+  "description": "Gateway compatível com o MVP OpenWA usando Baileys para QR estável sem Chromium.",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node --check server.js"
   },
   "dependencies": {
-    "@open-wa/wa-automate": "4.76.0",
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "7.0.0-rc13",
     "express": "^4.19.2",
+    "pino": "^9.4.0",
+    "qrcode": "^1.5.4",
     "socket.io": "^4.7.5"
-  },
-  "engines": {
-    "node": ">=18"
   }
 }
