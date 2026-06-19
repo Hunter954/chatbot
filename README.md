@@ -185,3 +185,14 @@ A IA só entra quando não há intenção clara nem FAQ correspondente.
 - Adicionar templates aprovados caso migre para WhatsApp Business Cloud API oficial.
 - Criar migrações Alembic para produção avançada.
 - Adicionar integração Chatwoot/CRM.
+
+## Correção OpenWA/Railway
+
+Se os logs do OpenWA mostrarem `Unable to read config file json: /config`, `No session data file found` ou `Data dir: ./_IGNORE_<sessao>`, veja `docs/RAILWAY_OPENWA_TROUBLESHOOTING.md`.
+
+Resumo da configuração recomendada:
+
+- Service OpenWA usando `openwa-service/Dockerfile`.
+- Volume do Railway montado em `/data`.
+- `OPENWA_PUBLIC_URL` com a URL pública do service OpenWA.
+- Escanear o QR Code e manter o serviço vivo por pelo menos 5 minutos antes de reiniciar.
