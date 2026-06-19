@@ -44,6 +44,7 @@ const OPENWA_QR_TIMEOUT = Number(process.env.OPENWA_QR_TIMEOUT ?? 0);
 const OPENWA_AUTH_TIMEOUT = Number(process.env.OPENWA_AUTH_TIMEOUT ?? 0);
 const OPENWA_MAX_QR = Number(process.env.OPENWA_MAX_QR || 0);
 const OPENWA_DEBUG_LOGS = String(process.env.OPENWA_DEBUG_LOGS || 'false').toLowerCase() === 'true';
+const OPENWA_USE_CUSTOM_CHROMIUM_ARGS = String(process.env.OPENWA_USE_CUSTOM_CHROMIUM_ARGS || 'false').toLowerCase() === 'true';
 
 
 function ensureWritableSessionPath() {
@@ -295,25 +296,14 @@ async function startOpenWa(io) {
       useChrome: OPENWA_USE_CHROME,
       qrTimeout: OPENWA_QR_TIMEOUT,
       authTimeout: OPENWA_AUTH_TIMEOUT,
+      customChromiumArgs: OPENWA_USE_CUSTOM_CHROMIUM_ARGS,
     });
 
-    const chromiumArgs = [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-first-run',
-      '--no-zygote',
-      '--disable-extensions',
-      '--disable-background-networking',
-      '--disable-sync',
-      '--disable-translate',
-      '--hide-scrollbars',
-      '--mute-audio',
-      '--window-size=1280,900',
-    ];
-
-    client = await create({
+    // IMPORTANTE: não enviar browserArgs/chromiumArgs por padrão.
+    // O próprio OpenWA avisou nos logs que argumentos customizados com Multi Device
+    // podem travar antes do QR: "Using custom chromium args with multi device will cause issues".
+    // No Railway, o Chrome da imagem base já roda com as flags necessárias.
+    const createConfig = {
       sessionId: SESSION_ID,
       sessionDataPath: SESSION_DATA_PATH,
       multiDevice: true,
@@ -330,16 +320,20 @@ async function startOpenWa(io) {
       logConsole: OPENWA_DEBUG_LOGS,
       logConsoleErrors: true,
       disableSpins: true,
-      bypassCSP: true,
-      browserArgs: chromiumArgs,
-      chromiumArgs,
       restartOnCrash: async () => {
         log('OpenWA pediu restartOnCrash. Reiniciando sessão...');
         client = null;
         setConnectionState(io, 'RESTARTING');
         setTimeout(() => startOpenWa(io).catch(() => {}), START_RETRY_MS);
       },
-    });
+    };
+
+    if (OPENWA_USE_CUSTOM_CHROMIUM_ARGS) {
+      createConfig.browserArgs = ['--no-sandbox', '--disable-setuid-sandbox'];
+      createConfig.chromiumArgs = createConfig.browserArgs;
+    }
+
+    client = await create(createConfig);
 
     clearQr(io);
     setConnectionState(io, 'READY');
@@ -500,7 +494,7 @@ function qrPageHtml() {
       } else if (state.has_client) {
         setStatus('WhatsApp conectado/autenticado. Você já pode testar mensagens.', 'ok');
       } else if (state.connection_state === 'ERROR') {
-        setStatus('Erro ao iniciar OpenWA. Veja os logs do Railway.', 'err');
+        setStatus('Erro ao iniciar OpenWA: ' + (state.last_error ? state.last_error.split('\n')[0] : 'veja os logs do Railway'), 'err');
       } else {
         setStatus('Estado: ' + state.connection_state + '. Aguardando QR...', 'info');
       }

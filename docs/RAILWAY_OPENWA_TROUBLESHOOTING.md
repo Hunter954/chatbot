@@ -1,64 +1,39 @@
 # Troubleshooting OpenWA no Railway
 
-## QR não aparece
+## QR não aparece e `/qr-state` fica STARTING
 
-Confira `/qr-state`.
-
-Se aparecer erro parecido com:
+Verifique os logs. Se aparecer:
 
 ```txt
-Error: spawn ps ENOENT
-syscall: spawn ps
-path: ps
-spawnargs: [ '-A', '-o', 'ppid,pid,stat,comm' ]
-```
-
-O problema é que a imagem base não tem o binário `ps`, usado por dependências do OpenWA/Puppeteer para lidar com processos. O Dockerfile desta versão instala `procps` e também cria um fallback para `ps` caso o gerenciador de pacotes não esteja disponível.
-
-## Timeout antes do QR
-
-Se aparecer:
-
-```txt
+Using custom chromium args with multi device will cause issues! Please remove them
 TimeoutError: Waiting failed: 30000ms exceeded
 ```
 
-Esta versão configura:
+aplique este patch. Ele remove `browserArgs`/`chromiumArgs` do `create()` por padrão.
 
-```js
-qrTimeout: 0
-authTimeout: 0
-useChrome: true
-autoRefresh: true
-killProcessOnTimeout: false
-```
+## Build quebra por apt/GPG do Chrome
 
-Isso impede que o OpenWA mate a sessão antes de você conseguir escanear o QR.
+Não use `apt-get update` neste Dockerfile. A imagem base pode ter repositório do Google Chrome com chave expirada/ausente. O Dockerfile deste patch não usa apt.
 
-## Sessão antiga quebrada
+## Sessão quebrada
 
-Use o endpoint:
+Troque temporariamente `OPENWA_SESSION_ID` ou limpe via:
 
 ```bash
 curl -X POST "https://SEU-OPENWA.up.railway.app/reset-session" \
-  -H "X-API-KEY: SUA_CHAVE"
+  -H "X-API-KEY: SUA_OPENWA_API_KEY"
 ```
 
-Ele remove:
+## Volume
+
+O volume do Railway deve estar montado em:
+
+```txt
+/data
+```
+
+A sessão deve ficar em:
 
 ```txt
 /data/sessions/_IGNORE_<OPENWA_SESSION_ID>
 ```
-
-Depois atualize `/qr`.
-
-## Healthcheck
-
-O Railway deve apontar para:
-
-```txt
-/healthz
-```
-
-Essa rota responde rápido, mesmo quando o WhatsApp ainda não está autenticado.
-
