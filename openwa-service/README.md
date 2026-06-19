@@ -1,16 +1,16 @@
 # OpenWA Service no Railway
 
-Esta versão substitui a tela/CLI da EASY API por um gateway programático em Node.js usando `@open-wa/wa-automate@4.76.0`.
+Esta versão usa um gateway programático em Node.js com `@open-wa/wa-automate@4.76.0`, sem depender da tela original da EASY API para renderizar QR.
 
-## Por que mudou
+## Correção importante desta versão
 
-A tela original do OpenWA estava entregando um `data:image/png;base64` que podia virar imagem de loading/spinner ou texto bruto no navegador. Agora o QR é capturado diretamente do evento oficial `qr` do OpenWA e enviado para a nossa página via Socket.IO.
+O Dockerfile não tenta mais criar `/data` no build. No Railway, `/data` é um Volume montado em runtime; tentar criar/chmod esse caminho durante o build pode gerar:
 
-## Arquivos principais
+```txt
+mkdir: cannot create directory '/data': Permission denied
+```
 
-- `server.js`: gateway HTTP, tela de QR, healthcheck, webhook para Flask e endpoints compatíveis.
-- `Dockerfile`: build do serviço OpenWA no Railway.
-- `package.json`: dependências Node.
+Agora o `server.js` cria `/data/sessions` somente quando o container já está rodando. Se `/data` não estiver gravável, ele usa fallback temporário em `/tmp/openwa-data/sessions` para o serviço não cair, mas nesse caso a sessão do WhatsApp não será persistida após restart.
 
 ## Variáveis do service OpenWA
 
@@ -26,19 +26,19 @@ OPENWA_SESSION_DATA_PATH=/data/sessions
 
 ## Volume obrigatório
 
-No service OpenWA do Railway, crie um volume montado em:
+No service OpenWA do Railway, crie um volume montado exatamente em:
 
 ```txt
 /data
 ```
 
-A sessão fica salva em `/data/sessions`. Sem volume, você terá que escanear o QR novamente após restart/redeploy.
+A sessão fica salva em `/data/sessions` quando o volume está correto.
 
 ## Rotas
 
 ```txt
-GET  /             Tela de QR
-GET  /qr           Tela de QR
+GET  /             Tela própria de QR
+GET  /qr           Tela própria de QR
 GET  /healthz      Healthcheck rápido para Railway
 GET  /readyz       Estado real da sessão WhatsApp
 GET  /qr-state     Estado do QR/conexão em JSON
@@ -48,15 +48,6 @@ POST /:method      Chama métodos do client OpenWA quando existirem
 POST /             Compatível: {"method":"sendText","args":[...]}
 ```
 
-## Teste de envio
-
-```bash
-curl -X POST "https://SEU-OPENWA.up.railway.app/sendText" \
-  -H "Content-Type: application/json" \
-  -H "X-API-KEY: sua-chave" \
-  -d '{"args":["55DDDNUMERO@c.us","Teste do gateway OpenWA"]}'
-```
-
 ## Primeiro uso
 
 1. Faça deploy do service OpenWA.
@@ -64,7 +55,3 @@ curl -X POST "https://SEU-OPENWA.up.railway.app/sendText" \
 3. Escaneie o QR pelo WhatsApp em **Aparelhos conectados**.
 4. Deixe o serviço ligado por pelo menos 5 minutos.
 5. Depois teste `/readyz` e o envio de mensagem.
-
-## Observação
-
-O endpoint `/readyz` pode retornar `503` enquanto o WhatsApp não estiver autenticado. Isso é esperado. O Railway deve usar `/healthz`, que sempre responde rápido quando o container está vivo.

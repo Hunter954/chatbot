@@ -12,15 +12,42 @@ const SESSION_ID = process.env.OPENWA_SESSION_ID || process.env.SESSION_ID || 'l
 const API_KEY = process.env.OPENWA_API_KEY || '';
 const WEBHOOK_URL = process.env.FLASK_WEBHOOK_URL || process.env.OPENWA_WEBHOOK_URL || '';
 const WEBHOOK_SECRET = process.env.OPENWA_WEBHOOK_SECRET || '';
-const DATA_DIR = process.env.OPENWA_DATA_DIR || '/data';
-const SESSION_DATA_PATH = process.env.OPENWA_SESSION_DATA_PATH || path.join(DATA_DIR, 'sessions');
+let DATA_DIR = process.env.OPENWA_DATA_DIR || '/data';
+let SESSION_DATA_PATH = process.env.OPENWA_SESSION_DATA_PATH || path.join(DATA_DIR, 'sessions');
 const PUBLIC_URL = process.env.OPENWA_PUBLIC_URL || '';
 const IGNORE_GROUPS = String(process.env.OPENWA_IGNORE_GROUPS || 'false').toLowerCase() === 'true';
 const QR_MAX_AGE_MS = Number(process.env.OPENWA_QR_MAX_AGE_MS || 60_000);
 const START_RETRY_MS = Number(process.env.OPENWA_START_RETRY_MS || 10_000);
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
-fs.mkdirSync(SESSION_DATA_PATH, { recursive: true });
+
+function ensureWritableSessionPath() {
+  const requestedDataDir = DATA_DIR;
+  const requestedSessionPath = SESSION_DATA_PATH;
+
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.mkdirSync(SESSION_DATA_PATH, { recursive: true });
+    fs.accessSync(SESSION_DATA_PATH, fs.constants.W_OK);
+    return;
+  } catch (err) {
+    const fallbackDataDir = '/tmp/openwa-data';
+    const fallbackSessionPath = path.join(fallbackDataDir, 'sessions');
+    console.warn(
+      new Date().toISOString(),
+      'Não consegui escrever no diretório de sessão configurado.',
+      `dataDir=${requestedDataDir}`,
+      `sessionDataPath=${requestedSessionPath}`,
+      `erro=${err?.message || err}`,
+      `Usando fallback temporário ${fallbackSessionPath}. No Railway, confira se o Volume está montado em /data.`
+    );
+    DATA_DIR = fallbackDataDir;
+    SESSION_DATA_PATH = fallbackSessionPath;
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.mkdirSync(SESSION_DATA_PATH, { recursive: true });
+  }
+}
+
+ensureWritableSessionPath();
 
 let client = null;
 let starting = false;

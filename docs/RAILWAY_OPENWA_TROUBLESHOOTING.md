@@ -116,3 +116,15 @@ Depois de conectar:
 OpenWA autenticado e cliente pronto.
 Estado OpenWA: CONNECTED
 ```
+
+## 8. Build falha com `mkdir: cannot create directory '/data': Permission denied`
+
+Esse erro acontece durante o build quando o Dockerfile tenta criar `/data` antes do Railway montar o Volume. O Volume só existe corretamente em runtime, não no build.
+
+A correção atual remove qualquer `mkdir/chmod /data` do Dockerfile. O `server.js` cria `/data/sessions` apenas quando o container já está rodando. Se `/data` não estiver gravável, ele cai temporariamente para `/tmp/openwa-data/sessions` para o serviço não morrer, mas o login do WhatsApp não será persistente até o volume ser corrigido.
+
+Mantenha o Volume do Railway montado em:
+
+```txt
+/data
+```
