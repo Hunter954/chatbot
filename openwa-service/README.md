@@ -1,77 +1,70 @@
-# OpenWA no Railway
+# OpenWA Service no Railway
 
-Este serviço roda o OpenWA/EASY API separado do Flask.
+Esta versão substitui a tela/CLI da EASY API por um gateway programático em Node.js usando `@open-wa/wa-automate@4.76.0`.
 
-## Arquivos importantes
+## Por que mudou
 
-- `openwa-service/Dockerfile`: imagem do serviço OpenWA.
-- `openwa-service/start-openwa.sh`: inicialização, webhook, sessão persistente e proxy.
-- `openwa-service/health-proxy.js`: responde `/healthz`, serve uma tela própria de QR Code e repassa chamadas para a EASY API.
-- `openwa-service/package.json`: fixa `@open-wa/wa-automate@4.76.0` no build.
+A tela original do OpenWA estava entregando um `data:image/png;base64` que podia virar imagem de loading/spinner ou texto bruto no navegador. Agora o QR é capturado diretamente do evento oficial `qr` do OpenWA e enviado para a nossa página via Socket.IO.
 
-## Por que existe `health-proxy.js`?
+## Arquivos principais
 
-O `railway.json` do projeto usa `healthcheckPath: /healthz`, que funciona no Flask.
-O OpenWA/EASY API não expõe `/healthz` por padrão. Sem o proxy, o Railway marca o deploy como unhealthy mesmo quando o OpenWA está iniciando corretamente.
+- `server.js`: gateway HTTP, tela de QR, healthcheck, webhook para Flask e endpoints compatíveis.
+- `Dockerfile`: build do serviço OpenWA no Railway.
+- `package.json`: dependências Node.
 
-O proxy escuta na porta pública do Railway (`PORT`, normalmente `8080`) e repassa as chamadas reais para o OpenWA rodando internamente em `OPENWA_INTERNAL_PORT` (`8081`).
-
-## Correção definitiva da tela do QR
-
-A tela original do OpenWA, em alguns ambientes, mostra isto:
-
-```txt
-SOCKET CONNECTED
-qr
-data:image/png;base64,...
-```
-
-Ou seja: o QR chegou, mas a página original colocou o QR dentro de uma caixa de texto.
-
-Por isso, a raiz `/` agora **não usa mais a tela original do OpenWA**. Ela serve uma tela própria do proxy que conecta no Socket.IO do OpenWA e renderiza o QR como imagem.
-
-Rotas úteis:
-
-```txt
-/                 -> tela própria de QR Code
-/qr               -> tela própria de QR Code
-/login            -> tela própria de QR Code
-/openwa-original  -> tela original do OpenWA, apenas para comparação
-/api-docs         -> documentação da EASY API
-/healthz          -> healthcheck do Railway
-/readyz           -> readiness da EASY API interna
-```
-
-## Variáveis obrigatórias
+## Variáveis do service OpenWA
 
 ```env
-OPENWA_API_KEY=troque-por-uma-chave-forte
+OPENWA_API_KEY=uma-chave-forte
 OPENWA_SESSION_ID=lanhouse-demo
 OPENWA_PUBLIC_URL=https://SEU-OPENWA.up.railway.app
 FLASK_WEBHOOK_URL=https://SEU-FLASK.up.railway.app/webhooks/openwa
 OPENWA_WEBHOOK_SECRET=o-mesmo-segredo-do-flask
+OPENWA_DATA_DIR=/data
+OPENWA_SESSION_DATA_PATH=/data/sessions
 ```
 
-## Volume
+## Volume obrigatório
 
-Monte o volume do Railway exatamente em:
+No service OpenWA do Railway, crie um volume montado em:
 
 ```txt
 /data
 ```
 
-A sessão será salva em:
+A sessão fica salva em `/data/sessions`. Sem volume, você terá que escanear o QR novamente após restart/redeploy.
+
+## Rotas
 
 ```txt
-/data/sessions
+GET  /             Tela de QR
+GET  /qr           Tela de QR
+GET  /healthz      Healthcheck rápido para Railway
+GET  /readyz       Estado real da sessão WhatsApp
+GET  /qr-state     Estado do QR/conexão em JSON
+GET  /api-docs     Documentação simples do gateway
+POST /sendText     Compatível com o Flask MVP: {"args":["55...@c.us","mensagem"]}
+POST /:method      Chama métodos do client OpenWA quando existirem
+POST /             Compatível: {"method":"sendText","args":[...]}
 ```
 
-## Login pelo QR Code
+## Teste de envio
 
-1. Abra a URL pública do OpenWA.
-2. Aguarde a tela própria “OpenWA - QR Code”.
-3. No celular, abra WhatsApp > Aparelhos conectados > Conectar aparelho.
-4. Escaneie o QR.
-5. Depois de autenticar, mantenha o serviço ligado por pelo menos 5 minutos antes de reiniciar.
+```bash
+curl -X POST "https://SEU-OPENWA.up.railway.app/sendText" \
+  -H "Content-Type: application/json" \
+  -H "X-API-KEY: sua-chave" \
+  -d '{"args":["55DDDNUMERO@c.us","Teste do gateway OpenWA"]}'
+```
 
-Se precisar comparar, abra `/openwa-original`, mas use `/` ou `/qr` para escanear.
+## Primeiro uso
+
+1. Faça deploy do service OpenWA.
+2. Abra a URL pública do OpenWA.
+3. Escaneie o QR pelo WhatsApp em **Aparelhos conectados**.
+4. Deixe o serviço ligado por pelo menos 5 minutos.
+5. Depois teste `/readyz` e o envio de mensagem.
+
+## Observação
+
+O endpoint `/readyz` pode retornar `503` enquanto o WhatsApp não estiver autenticado. Isso é esperado. O Railway deve usar `/healthz`, que sempre responde rápido quando o container está vivo.

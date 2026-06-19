@@ -1,10 +1,18 @@
 {
-  "name": "openwa-railway-service",
-  "version": "0.2.0",
+  "name": "openwa-programmatic-gateway",
+  "version": "1.0.0",
   "private": true,
-  "description": "OpenWA EASY API service wrapper for Railway with persistent sessions.",
-  "license": "UNLICENSED",
+  "description": "Gateway OpenWA estável para Railway com QR próprio, healthcheck, webhook e endpoints compatíveis com o MVP Flask.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
-    "@open-wa/wa-automate": "4.76.0"
+    "@open-wa/wa-automate": "4.76.0",
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

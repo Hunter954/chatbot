@@ -1,77 +1,118 @@
 # Troubleshooting OpenWA no Railway
 
-## 1. `Healthcheck failed` em `/healthz`
+## 1. Healthcheck falhando
 
-Causa: o `railway.json` do projeto usa `/healthz`, que existe no Flask, mas não existe no OpenWA/EASY API por padrão.
+Use `/healthz` como healthcheck. Ele só verifica se o gateway está vivo.
 
-Correção aplicada: o serviço OpenWA inclui `openwa-service/health-proxy.js`.
+`/readyz` mostra o estado real do WhatsApp e pode retornar `503` antes do QR ser escaneado. Não use `/readyz` como healthcheck do Railway.
 
-Esse proxy:
+## 2. QR aparece como spinner ou imagem azul
 
-- escuta na porta pública do Railway (`PORT`);
-- responde `200` em `/healthz`;
-- expõe `/readyz` para indicar se a EASY API interna já está aceitando conexão;
-- repassa todo o restante para o OpenWA interno em `OPENWA_INTERNAL_PORT`, por padrão `8081`.
+Isso acontecia na tela original da EASY API. Esta versão não usa mais essa tela. O QR agora vem diretamente do evento `qr` do `@open-wa/wa-automate`.
 
-## 2. QR Code aparecendo como texto `data:image/png;base64`
-
-Se a tela mostrar algo como:
+Abra:
 
 ```txt
-SOCKET CONNECTED
-qr
-data:image/png;base64,...
+https://SEU-OPENWA.up.railway.app/
 ```
 
-então o QR está chegando, mas a página original do OpenWA não renderizou a imagem.
-
-Correção aplicada: a rota `/` agora serve uma tela própria de QR Code pelo `health-proxy.js`. Essa tela conecta no Socket.IO do OpenWA e renderiza o QR como imagem.
-
-Use estas rotas:
+ou:
 
 ```txt
-/                 -> tela própria de QR Code
-/qr               -> tela própria de QR Code
-/login            -> tela própria de QR Code
-/openwa-original  -> tela original do OpenWA, apenas para comparação
+https://SEU-OPENWA.up.railway.app/qr
 ```
 
-Depois do redeploy:
+Se ainda aparecer apenas carregando, abra:
 
-1. abra a URL pública do OpenWA na raiz `/`;
-2. faça refresh forçado (`Ctrl + F5`);
-3. espere a tela “OpenWA - QR Code”;
-4. escaneie pelo WhatsApp.
+```txt
+https://SEU-OPENWA.up.railway.app/qr-state
+```
 
-## 3. `Data dir: /data/sessions/_IGNORE_lanhouse-demo`
+Veja os campos:
 
-Isso está correto. A sessão está dentro do volume persistente.
+```json
+{
+  "connection_state": "...",
+  "has_qr": true,
+  "has_client": false,
+  "last_error": "..."
+}
+```
 
-Se aparecer `No session data file found`, significa apenas que o QR Code ainda não foi escaneado para essa sessão.
+## 3. Sessão perde login após deploy
 
-## 4. Primeiro login
+Confirme que existe volume no service OpenWA montado exatamente em:
 
-1. Abra a URL pública do OpenWA.
-2. Escaneie o QR Code.
-3. Mantenha o serviço ligado por pelo menos 5 minutos.
-4. Depois disso, reinícios devem manter a sessão se o volume estiver montado em `/data`.
+```txt
+/data
+```
 
-## 5. Variáveis obrigatórias
+A sessão fica em:
 
-No service OpenWA, configure:
+```txt
+/data/sessions
+```
+
+## 4. Variáveis obrigatórias
 
 ```env
-OPENWA_API_KEY=troque-por-uma-chave-forte
+OPENWA_API_KEY=uma-chave-forte
 OPENWA_SESSION_ID=lanhouse-demo
 OPENWA_PUBLIC_URL=https://SEU-OPENWA.up.railway.app
 FLASK_WEBHOOK_URL=https://SEU-FLASK.up.railway.app/webhooks/openwa
 OPENWA_WEBHOOK_SECRET=o-mesmo-segredo-do-flask
+OPENWA_DATA_DIR=/data
+OPENWA_SESSION_DATA_PATH=/data/sessions
 ```
 
-## 6. Endpoints úteis
+No Flask, use:
+
+```env
+OPENWA_BASE_URL=https://SEU-OPENWA.up.railway.app
+OPENWA_API_KEY=mesma-chave-do-openwa
+OPENWA_WEBHOOK_SECRET=o-mesmo-segredo-do-openwa
+```
+
+## 5. Como testar envio depois de escanear
+
+```bash
+curl -X POST "https://SEU-OPENWA.up.railway.app/sendText" \
+  -H "Content-Type: application/json" \
+  -H "X-API-KEY: sua-chave" \
+  -d '{"args":["55DDDNUMERO@c.us","Teste"]}'
+```
+
+## 6. Webhook para o Flask
+
+Quando chegar mensagem, o gateway envia para:
 
 ```txt
-/healthz  -> healthcheck rápido do Railway
-/readyz   -> verifica se a EASY API interna está aceitando conexão
-/api-docs -> documentação da EASY API do OpenWA
+FLASK_WEBHOOK_URL
+```
+
+com os headers:
+
+```txt
+X-Webhook-Secret: OPENWA_WEBHOOK_SECRET
+X-OpenWA-Webhook-Secret: OPENWA_WEBHOOK_SECRET
+```
+
+O parser do MVP Flask aceita o payload em `data`, então ele continua compatível.
+
+## 7. Logs esperados
+
+No primeiro boot você deve ver algo como:
+
+```txt
+Gateway OpenWA escutando em 0.0.0.0:8080
+Sessão: lanhouse-demo | sessionDataPath: /data/sessions
+Iniciando OpenWA programático
+QR recebido via qr.**
+```
+
+Depois de conectar:
+
+```txt
+OpenWA autenticado e cliente pronto.
+Estado OpenWA: CONNECTED
 ```
