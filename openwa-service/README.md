@@ -15,28 +15,37 @@ FLASK_WEBHOOK_URL=https://SEU-FLASK.up.railway.app/webhooks/openwa
 OPENWA_WEBHOOK_SECRET=o-mesmo-segredo-configurado-no-flask
 ```
 
-## Volume obrigatório/recomendado
+## Volume obrigatório
 
-Crie um **Volume no Railway montado exatamente em `/data`**.
+Crie um **Volume no Railway montado exatamente em `/data`** no service `openwa-api`.
 
-O OpenWA salva a sessão em um diretório relativo como `./_IGNORE_lanhouse-demo`. Este Dockerfile usa `WORKDIR /data`, então esse diretório fica dentro do volume e não some quando o container reinicia ou faz redeploy.
+Agora o wrapper gera um `cli.config.json` dentro de `/data` com:
 
-Sem volume, o WhatsApp pode pedir QR Code novamente a cada redeploy.
-
-## Correção de permissão no volume
-
-Em alguns deploys, o Railway monta o volume como `root-owned`, enquanto a imagem padrão do OpenWA pode executar com um usuário sem permissão de escrita. Isso gera erro como:
-
-```txt
-sh: 1: cannot create /data/cli.config.json: Permission denied
+```json
+{
+  "sessionDataPath": "/data/sessions"
+}
 ```
 
-A correção aplicada aqui foi:
+Com isso, arquivos como `_IGNORE_lanhouse-demo` e `lanhouse-demo.data.json` ficam dentro do volume persistente.
 
-- rodar o service OpenWA como `root`;
-- deixar o arquivo de config em `/app/config/cli.config.json`, fora do volume;
-- usar `/data` apenas para sessão e arquivos persistentes;
-- validar escrita em `/data` no início do container.
+## Por que existe `package.json` neste diretório?
+
+O log anterior mostrava:
+
+```txt
+npm warn exec The following package was not found and will be installed: @open-wa/wa-automate@4.76.0
+```
+
+Isso acontecia porque o boot chamava `npx @open-wa/wa-automate@4.76.0`, fazendo o container baixar o pacote em tempo de execução.
+
+Agora o Dockerfile instala `@open-wa/wa-automate@4.76.0` durante o build e o script chama:
+
+```sh
+/app/node_modules/.bin/wa-automate
+```
+
+Assim o deploy fica mais previsível e rápido.
 
 ## Primeiro deploy
 
@@ -46,12 +55,18 @@ A correção aplicada aqui foi:
 4. Depois de escanear, mantenha o serviço vivo por pelo menos 5 minutos antes de reiniciar/redeployar.
 5. Teste a API em `/api-docs/`.
 
-## Sobre o aviso `/config`
+## Como validar nos logs
 
-Alguns deploys do container mostram:
+Procure uma linha parecida com:
 
 ```txt
-Unable to read config file json: /config
+Iniciando OpenWA na porta 8080, sessão lanhouse-demo, sessionDataPath /data/sessions
 ```
 
-Este Dockerfile inicia o OpenWA com `--config /app/config/cli.config.json`, evitando depender de um arquivo `/config` inexistente ou de um arquivo dentro do volume.
+Depois procure no log do OpenWA algo como:
+
+```txt
+Data dir: /data/sessions/_IGNORE_lanhouse-demo
+```
+
+Se aparecer `Data dir: ./_IGNORE_lanhouse-demo`, o service ainda está rodando uma imagem antiga ou não recebeu estes arquivos.

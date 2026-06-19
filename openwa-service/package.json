@@ -1,0 +1,10 @@
+{
+  "name": "openwa-railway-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenWA EASY API service wrapper for Railway with persistent sessions.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@open-wa/wa-automate": "4.76.0"
+  }
+}

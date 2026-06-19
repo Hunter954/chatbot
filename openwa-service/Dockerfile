@@ -2,19 +2,24 @@
 # No Railway, crie um segundo service apontando para este Dockerfile com:
 # RAILWAY_DOCKERFILE_PATH=openwa-service/Dockerfile
 #
-# Importante para Railway:
-# - Monte um Volume em /data para persistir a sessão do WhatsApp.
-# - Rodamos como root porque volumes do Railway podem ser montados sem permissão
-#   de escrita para o usuário padrão da imagem OpenWA.
-# - O arquivo de config fica fora do volume para evitar erro de permissão.
+# Importante:
+# - Monte um Volume em /data para persistir QR/session do WhatsApp.
+# - O pacote OpenWA fica instalado no build, não no boot.
+# - O sessionDataPath é forçado em /data/sessions via cli.config.json.
 FROM openwa/wa-automate
 
 USER root
-WORKDIR /data
+WORKDIR /app
 
-RUN mkdir -p /data /app/config \
-    && printf '{}' > /app/config/cli.config.json \
-    && chmod 644 /app/config/cli.config.json
+ENV W_A_V=4.76.0 \
+    PUPPETEER_SKIP_DOWNLOAD=true \
+    OPENWA_DATA_DIR=/data \
+    OPENWA_SESSION_DATA_DIR=/data/sessions
+
+COPY openwa-service/package.json /app/package.json
+RUN npm install --omit=dev --no-audit --no-fund \
+    && npm cache clean --force \
+    && mkdir -p /data /data/sessions /app/config
 
 COPY openwa-service/start-openwa.sh /app/start-openwa.sh
 RUN chmod +x /app/start-openwa.sh
