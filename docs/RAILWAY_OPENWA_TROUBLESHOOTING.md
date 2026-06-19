@@ -13,11 +13,9 @@ Esse proxy:
 - expõe `/readyz` para indicar se a EASY API interna já está aceitando conexão;
 - repassa todo o restante para o OpenWA interno em `OPENWA_INTERNAL_PORT`, por padrão `8081`.
 
-Com isso, você não precisa quebrar o healthcheck do Flask nem remover o `railway.json`.
-
 ## 2. QR Code aparecendo como texto `data:image/png;base64`
 
-Se a tela do OpenWA mostrar algo parecido com isto em uma caixa de texto:
+Se a tela mostrar algo como:
 
 ```txt
 SOCKET CONNECTED
@@ -25,15 +23,24 @@ qr
 data:image/png;base64,...
 ```
 
-isso significa que o QR chegou, mas a interface do OpenWA não renderizou a imagem.
+então o QR está chegando, mas a página original do OpenWA não renderizou a imagem.
 
-Correção aplicada: `health-proxy.js` injeta um script em páginas HTML do OpenWA. Esse script detecta automaticamente `data:image/png;base64,...` e renderiza o QR Code em uma caixa limpa no canto da tela.
+Correção aplicada: a rota `/` agora serve uma tela própria de QR Code pelo `health-proxy.js`. Essa tela conecta no Socket.IO do OpenWA e renderiza o QR como imagem.
+
+Use estas rotas:
+
+```txt
+/                 -> tela própria de QR Code
+/qr               -> tela própria de QR Code
+/login            -> tela própria de QR Code
+/openwa-original  -> tela original do OpenWA, apenas para comparação
+```
 
 Depois do redeploy:
 
-1. abra novamente a URL pública do OpenWA;
-2. dê um refresh forçado no navegador (`Ctrl + F5`);
-3. aguarde aparecer a caixa “QR Code do WhatsApp”;
+1. abra a URL pública do OpenWA na raiz `/`;
+2. faça refresh forçado (`Ctrl + F5`);
+3. espere a tela “OpenWA - QR Code”;
 4. escaneie pelo WhatsApp.
 
 ## 3. `Data dir: /data/sessions/_IGNORE_lanhouse-demo`

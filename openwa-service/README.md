@@ -6,7 +6,7 @@ Este serviço roda o OpenWA/EASY API separado do Flask.
 
 - `openwa-service/Dockerfile`: imagem do serviço OpenWA.
 - `openwa-service/start-openwa.sh`: inicialização, webhook, sessão persistente e proxy.
-- `openwa-service/health-proxy.js`: responde `/healthz`, repassa chamadas para a EASY API e corrige a tela do QR Code quando o OpenWA exibe `data:image/png;base64` como texto bruto.
+- `openwa-service/health-proxy.js`: responde `/healthz`, serve uma tela própria de QR Code e repassa chamadas para a EASY API.
 - `openwa-service/package.json`: fixa `@open-wa/wa-automate@4.76.0` no build.
 
 ## Por que existe `health-proxy.js`?
@@ -16,13 +16,31 @@ O OpenWA/EASY API não expõe `/healthz` por padrão. Sem o proxy, o Railway mar
 
 O proxy escuta na porta pública do Railway (`PORT`, normalmente `8080`) e repassa as chamadas reais para o OpenWA rodando internamente em `OPENWA_INTERNAL_PORT` (`8081`).
 
-Além disso, algumas versões/telas do OpenWA podem mostrar o QR como texto bruto no formato:
+## Correção definitiva da tela do QR
+
+A tela original do OpenWA, em alguns ambientes, mostra isto:
 
 ```txt
-qr data:image/png;base64,...
+SOCKET CONNECTED
+qr
+data:image/png;base64,...
 ```
 
-O proxy injeta um pequeno script em páginas HTML do OpenWA para detectar esse `data:image` e renderizar o QR Code em uma caixa limpa no canto da tela.
+Ou seja: o QR chegou, mas a página original colocou o QR dentro de uma caixa de texto.
+
+Por isso, a raiz `/` agora **não usa mais a tela original do OpenWA**. Ela serve uma tela própria do proxy que conecta no Socket.IO do OpenWA e renderiza o QR como imagem.
+
+Rotas úteis:
+
+```txt
+/                 -> tela própria de QR Code
+/qr               -> tela própria de QR Code
+/login            -> tela própria de QR Code
+/openwa-original  -> tela original do OpenWA, apenas para comparação
+/api-docs         -> documentação da EASY API
+/healthz          -> healthcheck do Railway
+/readyz           -> readiness da EASY API interna
+```
 
 ## Variáveis obrigatórias
 
@@ -48,23 +66,12 @@ A sessão será salva em:
 /data/sessions
 ```
 
-## Testes rápidos
-
-Após o deploy:
-
-```txt
-https://SEU-OPENWA.up.railway.app/healthz
-https://SEU-OPENWA.up.railway.app/readyz
-https://SEU-OPENWA.up.railway.app/api-docs
-```
-
-`/healthz` deve responder mesmo antes do QR Code.  
-`/readyz` só responde `ok: true` quando a EASY API interna estiver aceitando conexão.
-
 ## Login pelo QR Code
 
 1. Abra a URL pública do OpenWA.
-2. Aguarde aparecer a caixa “QR Code do WhatsApp”.
+2. Aguarde a tela própria “OpenWA - QR Code”.
 3. No celular, abra WhatsApp > Aparelhos conectados > Conectar aparelho.
 4. Escaneie o QR.
 5. Depois de autenticar, mantenha o serviço ligado por pelo menos 5 minutos antes de reiniciar.
+
+Se precisar comparar, abra `/openwa-original`, mas use `/` ou `/qr` para escanear.
