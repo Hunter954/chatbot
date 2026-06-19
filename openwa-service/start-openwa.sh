@@ -3,7 +3,8 @@ set -eu
 
 DATA_DIR="${OPENWA_DATA_DIR:-/data}"
 SESSION_DATA_DIR="${OPENWA_SESSION_DATA_DIR:-${DATA_DIR}/sessions}"
-CONFIG_FILE="${DATA_DIR}/cli.config.json"
+CONFIG_DIR="/app/config"
+CONFIG_FILE="${CONFIG_DIR}/cli.config.json"
 PORT="${PORT:-8080}"
 SESSION_ID="${OPENWA_SESSION_ID:-default}"
 
@@ -11,21 +12,24 @@ SESSION_ID="${OPENWA_SESSION_ID:-default}"
 : "${FLASK_WEBHOOK_URL:?FLASK_WEBHOOK_URL precisa estar configurada no Railway}"
 : "${OPENWA_WEBHOOK_SECRET:?OPENWA_WEBHOOK_SECRET precisa estar configurada no Railway}"
 
-mkdir -p "$DATA_DIR" "$SESSION_DATA_DIR"
+mkdir -p "$DATA_DIR" "$SESSION_DATA_DIR" "$CONFIG_DIR"
 
-# Railway pode montar o volume como root-owned ou com permissões inconsistentes.
-# Como este container roda como root, isso normaliza o volume antes de gravar.
+# O Railway monta volumes com permissões que podem variar entre deploys.
+# O container roda como root para conseguir normalizar o volume antes do OpenWA iniciar.
 chmod -R a+rwX "$DATA_DIR" 2>/dev/null || true
 
 if ! (touch "$DATA_DIR/.write-test" && rm -f "$DATA_DIR/.write-test"); then
-  echo "ERRO: o volume em $DATA_DIR não está gravável." >&2
+  echo "ERRO REAL: o volume em $DATA_DIR não está gravável." >&2
   echo "No Railway, monte o Volume exatamente em /data no service openwa-api." >&2
   exit 1
 fi
 
+# Evita ruído desnecessário de primeiro boot: o OpenWA espera esta pasta.
+mkdir -p "${SESSION_DATA_DIR}/_IGNORE_${SESSION_ID}"
+
 # O OpenWA usa sessionDataPath para decidir onde salvar arquivos como:
 # <session>.data.json e _IGNORE_<session>.
-# Sem isso, ele volta para ./_IGNORE_<session>, que pode não persistir no Railway.
+# Mantemos este config fora do volume para evitar problemas de permissão em /data.
 cat > "$CONFIG_FILE" <<EOF_CONFIG
 {
   "sessionId": "${SESSION_ID}",
@@ -38,25 +42,45 @@ cat > "$CONFIG_FILE" <<EOF_CONFIG
 }
 EOF_CONFIG
 
-WEBHOOK_URL="${FLASK_WEBHOOK_URL}?token=${OPENWA_WEBHOOK_SECRET}"
-PUBLIC_ARGS=""
+case "$FLASK_WEBHOOK_URL" in
+  *\?*) WEBHOOK_URL="${FLASK_WEBHOOK_URL}&token=${OPENWA_WEBHOOK_SECRET}" ;;
+  *) WEBHOOK_URL="${FLASK_WEBHOOK_URL}?token=${OPENWA_WEBHOOK_SECRET}" ;;
+esac
 
+PUBLIC_ARGS=""
 if [ -n "${OPENWA_PUBLIC_URL:-}" ]; then
   PUBLIC_ARGS="--api-host ${OPENWA_PUBLIC_URL} --host ${OPENWA_PUBLIC_URL}"
 fi
 
-cd "$DATA_DIR"
+if [ ! -f "${SESSION_DATA_DIR}/${SESSION_ID}.data.json" ]; then
+  echo "Sessão '${SESSION_ID}' ainda não autenticada. Abra a URL pública do OpenWA e escaneie o QR Code."
+  echo "Depois de escanear, mantenha o serviço ligado por pelo menos 5 minutos antes de reiniciar."
+fi
 
 echo "Iniciando OpenWA na porta ${PORT}, sessão ${SESSION_ID}, sessionDataPath ${SESSION_DATA_DIR}"
 
-# Usamos o pacote instalado no build em /app/node_modules, evitando download via npx a cada boot.
-# shellcheck disable=SC2086
-exec /app/node_modules/.bin/wa-automate \
-  --config "cli.config.json" \
-  --port "$PORT" \
-  --key "$OPENWA_API_KEY" \
-  --session-id "$SESSION_ID" \
-  $PUBLIC_ARGS \
-  --webhook "$WEBHOOK_URL" \
-  --keep-alive \
-  --skip-save-postman-collection
+# Importante: o OpenWA escreve várias mensagens normais no stderr.
+# No Railway isso aparece como [err], mesmo sem crash. Por padrão redirecionamos stderr para stdout
+# para os logs normais aparecerem como informação. Desative com OPENWA_LOG_STDERR_TO_STDOUT=false.
+if [ "${OPENWA_LOG_STDERR_TO_STDOUT:-true}" = "true" ]; then
+  # shellcheck disable=SC2086
+  exec /app/node_modules/.bin/wa-automate \
+    --config "$CONFIG_FILE" \
+    --port "$PORT" \
+    --key "$OPENWA_API_KEY" \
+    --session-id "$SESSION_ID" \
+    $PUBLIC_ARGS \
+    --webhook "$WEBHOOK_URL" \
+    --keep-alive \
+    2>&1
+else
+  # shellcheck disable=SC2086
+  exec /app/node_modules/.bin/wa-automate \
+    --config "$CONFIG_FILE" \
+    --port "$PORT" \
+    --key "$OPENWA_API_KEY" \
+    --session-id "$SESSION_ID" \
+    $PUBLIC_ARGS \
+    --webhook "$WEBHOOK_URL" \
+    --keep-alive
+fi

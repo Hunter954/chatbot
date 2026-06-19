@@ -1,11 +1,16 @@
 # Serviço OpenWA no Railway
 
-Este diretório deixa o repositório pronto para ter dois services no Railway:
+Este diretório roda o OpenWA/EASY API como um service separado do Flask.
 
-1. `flask-bot`: usa o `Dockerfile` da raiz.
-2. `openwa-api`: usa `openwa-service/Dockerfile`.
+## Service no Railway
 
-## Variáveis do service `openwa-api`
+Crie um service `openwa-api` usando:
+
+```env
+RAILWAY_DOCKERFILE_PATH=openwa-service/Dockerfile
+```
+
+## Variáveis obrigatórias
 
 ```env
 OPENWA_API_KEY=crie-uma-chave-grande
@@ -15,58 +20,47 @@ FLASK_WEBHOOK_URL=https://SEU-FLASK.up.railway.app/webhooks/openwa
 OPENWA_WEBHOOK_SECRET=o-mesmo-segredo-configurado-no-flask
 ```
 
+Opcional:
+
+```env
+OPENWA_LOG_STDERR_TO_STDOUT=true
+```
+
+Essa variável fica `true` por padrão porque o OpenWA escreve várias mensagens normais no `stderr`; no Railway elas aparecem como `[err]`, mesmo quando não existe erro real.
+
 ## Volume obrigatório
 
-Crie um **Volume no Railway montado exatamente em `/data`** no service `openwa-api`.
+Monte um **Volume exatamente em `/data`** no service `openwa-api`.
 
-Agora o wrapper gera um `cli.config.json` dentro de `/data` com:
-
-```json
-{
-  "sessionDataPath": "/data/sessions"
-}
-```
-
-Com isso, arquivos como `_IGNORE_lanhouse-demo` e `lanhouse-demo.data.json` ficam dentro do volume persistente.
-
-## Por que existe `package.json` neste diretório?
-
-O log anterior mostrava:
+A sessão fica em:
 
 ```txt
-npm warn exec The following package was not found and will be installed: @open-wa/wa-automate@4.76.0
+/data/sessions
 ```
 
-Isso acontecia porque o boot chamava `npx @open-wa/wa-automate@4.76.0`, fazendo o container baixar o pacote em tempo de execução.
-
-Agora o Dockerfile instala `@open-wa/wa-automate@4.76.0` durante o build e o script chama:
-
-```sh
-/app/node_modules/.bin/wa-automate
-```
-
-Assim o deploy fica mais previsível e rápido.
-
-## Primeiro deploy
-
-1. Faça deploy do service `openwa-api`.
-2. Abra a URL pública do OpenWA, por exemplo: `https://SEU-OPENWA.up.railway.app`.
-3. Escaneie o QR Code.
-4. Depois de escanear, mantenha o serviço vivo por pelo menos 5 minutos antes de reiniciar/redeployar.
-5. Teste a API em `/api-docs/`.
-
-## Como validar nos logs
-
-Procure uma linha parecida com:
-
-```txt
-Iniciando OpenWA na porta 8080, sessão lanhouse-demo, sessionDataPath /data/sessions
-```
-
-Depois procure no log do OpenWA algo como:
+O log correto deve mostrar algo como:
 
 ```txt
 Data dir: /data/sessions/_IGNORE_lanhouse-demo
 ```
 
-Se aparecer `Data dir: ./_IGNORE_lanhouse-demo`, o service ainda está rodando uma imagem antiga ou não recebeu estes arquivos.
+Se aparecer `./_IGNORE_lanhouse-demo`, você ainda está rodando uma imagem antiga ou não aplicou estes arquivos.
+
+## Primeiro deploy
+
+1. Faça redeploy do `openwa-api`.
+2. Abra a URL pública do OpenWA.
+3. Escaneie o QR Code.
+4. Depois de escanear, mantenha o serviço ligado por pelo menos 5 minutos.
+5. Só depois faça novo deploy/restart.
+
+Antes de escanear, é normal aparecer que não existe sessão salva. Isso não é crash.
+
+## O que esta versão corrige
+
+- Não baixa `@open-wa/wa-automate` no boot; instala no build.
+- Força `sessionDataPath=/data/sessions`.
+- Garante que `/data` está gravável antes de iniciar.
+- Cria a pasta `_IGNORE_<sessão>` antes do OpenWA iniciar.
+- Redireciona logs normais de `stderr` para `stdout` para evitar falso `[err]` no Railway.
+- Mantém o config em `/app/config/cli.config.json`, fora do volume, evitando novos problemas de permissão.
