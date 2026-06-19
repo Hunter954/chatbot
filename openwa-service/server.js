@@ -7,6 +7,26 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { create, ev } = require('@open-wa/wa-automate');
 
+let earlyCrashLog = '';
+
+process.on('uncaughtException', (err) => {
+  const message = err?.stack || err?.message || String(err);
+  earlyCrashLog = message;
+  console.error(new Date().toISOString(), 'uncaughtException:', message);
+
+  // O erro `spawn ps ENOENT` vem de libs de processo usadas pelo OpenWA/Puppeteer
+  // quando o binário `ps` não existe no container. O Dockerfile agora instala procps,
+  // mas este guard impede que um evento não tratado derrube o gateway antes do QR.
+  if (/spawn ps ENOENT/i.test(message)) return;
+});
+
+process.on('unhandledRejection', (reason) => {
+  const message = reason?.stack || reason?.message || String(reason);
+  earlyCrashLog = message;
+  console.error(new Date().toISOString(), 'unhandledRejection:', message);
+});
+
+
 const PORT = Number(process.env.PORT || 8080);
 const SESSION_ID = process.env.OPENWA_SESSION_ID || process.env.SESSION_ID || 'lanhouse-demo';
 const API_KEY = process.env.OPENWA_API_KEY || '';
@@ -18,6 +38,12 @@ const PUBLIC_URL = process.env.OPENWA_PUBLIC_URL || '';
 const IGNORE_GROUPS = String(process.env.OPENWA_IGNORE_GROUPS || 'false').toLowerCase() === 'true';
 const QR_MAX_AGE_MS = Number(process.env.OPENWA_QR_MAX_AGE_MS || 60_000);
 const START_RETRY_MS = Number(process.env.OPENWA_START_RETRY_MS || 10_000);
+const OPENWA_USE_CHROME = String(process.env.OPENWA_USE_CHROME || 'true').toLowerCase() !== 'false';
+const OPENWA_AUTO_REFRESH = String(process.env.OPENWA_AUTO_REFRESH || 'true').toLowerCase() !== 'false';
+const OPENWA_QR_TIMEOUT = Number(process.env.OPENWA_QR_TIMEOUT ?? 0);
+const OPENWA_AUTH_TIMEOUT = Number(process.env.OPENWA_AUTH_TIMEOUT ?? 0);
+const OPENWA_MAX_QR = Number(process.env.OPENWA_MAX_QR || 0);
+const OPENWA_DEBUG_LOGS = String(process.env.OPENWA_DEBUG_LOGS || 'false').toLowerCase() === 'true';
 
 
 function ensureWritableSessionPath() {
@@ -111,7 +137,7 @@ function publicState() {
     public_url: PUBLIC_URL,
     session_data_path: SESSION_DATA_PATH,
     webhook_configured: Boolean(WEBHOOK_URL),
-    last_error: lastError,
+    last_error: lastError || earlyCrashLog,
     last_webhook_error: lastWebhookError,
     counters: {
       inbound_messages: receivedMessages,
@@ -266,23 +292,53 @@ async function startOpenWa(io) {
       sessionDataPath: SESSION_DATA_PATH,
       dataDir: DATA_DIR,
       webhookConfigured: Boolean(WEBHOOK_URL),
+      useChrome: OPENWA_USE_CHROME,
+      qrTimeout: OPENWA_QR_TIMEOUT,
+      authTimeout: OPENWA_AUTH_TIMEOUT,
     });
+
+    const chromiumArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-translate',
+      '--hide-scrollbars',
+      '--mute-audio',
+      '--window-size=1280,900',
+    ];
 
     client = await create({
       sessionId: SESSION_ID,
       sessionDataPath: SESSION_DATA_PATH,
       multiDevice: true,
+      useChrome: OPENWA_USE_CHROME,
+      autoRefresh: OPENWA_AUTO_REFRESH,
       headless: true,
+      popup: false,
       cacheEnabled: false,
-      restartOnCrash: startOpenWa.bind(null, io),
-      browserArgs: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-first-run',
-        '--no-zygote',
-      ],
+      qrTimeout: OPENWA_QR_TIMEOUT,
+      authTimeout: OPENWA_AUTH_TIMEOUT,
+      maxQr: OPENWA_MAX_QR,
+      killProcessOnTimeout: false,
+      blockCrashLogs: true,
+      logConsole: OPENWA_DEBUG_LOGS,
+      logConsoleErrors: true,
+      disableSpins: true,
+      bypassCSP: true,
+      browserArgs: chromiumArgs,
+      chromiumArgs,
+      restartOnCrash: async () => {
+        log('OpenWA pediu restartOnCrash. Reiniciando sessão...');
+        client = null;
+        setConnectionState(io, 'RESTARTING');
+        setTimeout(() => startOpenWa(io).catch(() => {}), START_RETRY_MS);
+      },
     });
 
     clearQr(io);
@@ -554,6 +610,32 @@ app.get(['/', '/qr', '/login'], (_req, res) => {
 
 app.get(['/api-docs', '/docs'], (_req, res) => {
   res.type('html').send(docsHtml());
+});
+
+
+app.post('/reset-session', requireApiKey, async (_req, res) => {
+  try {
+    if (client && typeof client.kill === 'function') await client.kill();
+  } catch (err) {
+    log('Erro ao matar cliente antes do reset:', err?.message || err);
+  }
+
+  client = null;
+  clearQr(io);
+
+  const sessionDir = path.join(SESSION_DATA_PATH, `_IGNORE_${SESSION_ID}`);
+  try {
+    if (fs.existsSync(sessionDir)) {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+      log('Sessão removida:', sessionDir);
+    }
+  } catch (err) {
+    lastError = `Falha ao remover sessão ${sessionDir}: ${err?.message || err}`;
+    return res.status(500).json({ ok: false, error: lastError, state: publicState() });
+  }
+
+  startOpenWa(io).catch(() => {});
+  res.json({ ok: true, message: 'Sessão removida e reinício solicitado.', removed: sessionDir, state: publicState() });
 });
 
 app.post('/restart-session', requireApiKey, async (_req, res) => {
