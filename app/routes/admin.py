@@ -11,6 +11,8 @@ from app.models import (
     Conversation,
     FAQEntry,
     Message,
+    OutboxMessage,
+    AnalyticsEvent,
     Product,
     SupportTicket,
     Tenant,
@@ -49,6 +51,111 @@ def _tenant_or_404(slug_or_id: str | None = None):
 
 def _payload():
     return request.get_json(silent=True) or {}
+
+
+@admin_bp.get('/debug/webhook')
+@require_admin_token
+def debug_webhook():
+    tenant, error = _tenant_or_404(request.args.get('tenant'))
+    if error:
+        return error
+
+    recent_messages = (
+        Message.query.filter_by(tenant_id=tenant.id)
+        .order_by(Message.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    recent_contacts = (
+        Contact.query.filter_by(tenant_id=tenant.id)
+        .order_by(Contact.updated_at.desc())
+        .limit(20)
+        .all()
+    )
+    recent_outbox = (
+        OutboxMessage.query.filter_by(tenant_id=tenant.id)
+        .order_by(OutboxMessage.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    recent_events = (
+        AnalyticsEvent.query.filter_by(tenant_id=tenant.id)
+        .order_by(AnalyticsEvent.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    channels = Channel.query.filter_by(tenant_id=tenant.id).order_by(Channel.created_at.desc()).all()
+
+    return jsonify({
+        'ok': True,
+        'tenant': {'id': tenant.id, 'slug': tenant.slug, 'name': tenant.name},
+        'counts': {
+            'contacts': Contact.query.filter_by(tenant_id=tenant.id).count(),
+            'conversations': Conversation.query.filter_by(tenant_id=tenant.id).count(),
+            'messages': Message.query.filter_by(tenant_id=tenant.id).count(),
+            'inbound_messages': Message.query.filter_by(tenant_id=tenant.id, direction='inbound').count(),
+            'outbound_messages': Message.query.filter_by(tenant_id=tenant.id, direction='outbound').count(),
+            'outbox': OutboxMessage.query.filter_by(tenant_id=tenant.id).count(),
+        },
+        'channels': [
+            {
+                'id': c.id,
+                'provider': c.provider,
+                'session_id': c.session_id,
+                'base_url': c.base_url,
+                'api_key_configured': bool(c.api_key),
+                'is_active': c.is_active,
+                'created_at': c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in channels
+        ],
+        'recent_contacts': [
+            {
+                'id': c.id,
+                'wa_id': c.wa_id,
+                'phone': c.phone,
+                'name': c.name,
+                'updated_at': c.updated_at.isoformat() if c.updated_at else None,
+            }
+            for c in recent_contacts
+        ],
+        'recent_messages': [
+            {
+                'id': m.id,
+                'direction': m.direction,
+                'contact_id': m.contact_id,
+                'conversation_id': m.conversation_id,
+                'provider_message_id': m.provider_message_id,
+                'type': m.message_type,
+                'body': m.body,
+                'status': m.status,
+                'created_at': m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in recent_messages
+        ],
+        'recent_outbox': [
+            {
+                'id': o.id,
+                'to_wa_id': o.to_wa_id,
+                'status': o.status,
+                'error': o.error,
+                'body': o.body,
+                'created_at': o.created_at.isoformat() if o.created_at else None,
+            }
+            for o in recent_outbox
+        ],
+        'recent_events': [
+            {
+                'id': e.id,
+                'event_type': e.event_type,
+                'contact_id': e.contact_id,
+                'conversation_id': e.conversation_id,
+                'data': e.data,
+                'created_at': e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in recent_events
+        ],
+    })
 
 
 @admin_bp.get("/tenants")

@@ -14,7 +14,7 @@
         <h1>{{ tenant.name }}</h1>
         <p>{{ tenant.segment }} · {{ tenant.timezone }}</p>
       </div>
-      <a class="button" href="/api/v1/analytics/summary?admin_token={{ token }}">API Analytics</a>
+      <div class="actions"><a class="button" href="/api/v1/analytics/summary?admin_token={{ token }}">API Analytics</a><a class="button" href="/api/v1/debug/webhook?admin_token={{ token }}">Debug Webhook</a></div>
     </header>
 
     <section class="grid cards">

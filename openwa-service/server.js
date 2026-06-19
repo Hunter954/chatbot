@@ -22,6 +22,8 @@ const QR_MAX_AGE_MS = Number(process.env.OPENWA_QR_MAX_AGE_MS || 120_000);
 const START_RETRY_MS = Number(process.env.OPENWA_START_RETRY_MS || 5_000);
 const PAIRING_PHONE = String(process.env.OPENWA_PAIRING_PHONE || '').replace(/\D/g, '');
 const LOG_LEVEL = process.env.OPENWA_LOG_LEVEL || 'silent';
+const FORWARD_FROM_ME = String(process.env.OPENWA_FORWARD_FROM_ME || 'false').toLowerCase() === 'true';
+const RECENT_LIMIT = Number(process.env.OPENWA_RECENT_LIMIT || 30);
 
 let DATA_DIR = process.env.OPENWA_DATA_DIR || '/data';
 let SESSION_DATA_PATH = process.env.OPENWA_SESSION_DATA_PATH || path.join(DATA_DIR, 'sessions');
@@ -59,7 +61,14 @@ let lastError = '';
 let lastDisconnectReason = '';
 let lastWebhookError = '';
 let receivedMessages = 0;
+let rawMessageEvents = 0;
+let ignoredFromMeMessages = 0;
+let ignoredEmptyMessages = 0;
 let sentMessages = 0;
+let lastWebhookAt = null;
+let lastWebhookStatus = null;
+let lastWebhookResponse = '';
+let recentInbound = [];
 let reconnectTimer = null;
 let saveCredsFn = null;
 
@@ -96,6 +105,27 @@ function qrExpired() {
   return lastQrAt ? Date.now() - new Date(lastQrAt).getTime() > QR_MAX_AGE_MS : false;
 }
 
+function redact(value) {
+  if (!value) return '';
+  const s = String(value);
+  if (s.length <= 8) return '***';
+  return `${s.slice(0, 4)}...${s.slice(-4)}`;
+}
+
+function rememberInbound(message, meta = {}) {
+  recentInbound.unshift({
+    at: nowIso(),
+    id: message?.id || message?.messageId || '',
+    from: message?.from || '',
+    chatId: message?.chatId || '',
+    fromMe: Boolean(message?.fromMe || message?.isSentByMe),
+    body: String(message?.body || message?.text || '').slice(0, 500),
+    type: message?.type || '',
+    meta,
+  });
+  if (recentInbound.length > RECENT_LIMIT) recentInbound = recentInbound.slice(0, RECENT_LIMIT);
+}
+
 function publicState() {
   return {
     ok: true,
@@ -117,8 +147,15 @@ function publicState() {
     last_error: lastError,
     last_disconnect_reason: lastDisconnectReason,
     last_webhook_error: lastWebhookError,
+    last_webhook_at: lastWebhookAt,
+    last_webhook_status: lastWebhookStatus,
+    last_webhook_response: lastWebhookResponse,
+    forward_from_me: FORWARD_FROM_ME,
     counters: {
+      raw_message_events: rawMessageEvents,
       inbound_messages: receivedMessages,
+      ignored_from_me: ignoredFromMeMessages,
+      ignored_empty: ignoredEmptyMessages,
       outbound_messages: sentMessages,
     },
   };
@@ -267,21 +304,27 @@ async function postWebhook(message) {
   };
 
   try {
+    lastWebhookAt = nowIso();
     const response = await fetch(WEBHOOK_URL, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         'x-webhook-secret': WEBHOOK_SECRET,
         'x-openwa-webhook-secret': WEBHOOK_SECRET,
+        'x-whatsapp-gateway': 'baileys-compatible',
       },
       body: JSON.stringify(payload),
     });
 
+    lastWebhookStatus = response.status;
+    const body = await response.text().catch(() => '');
+    lastWebhookResponse = body.slice(0, 500);
+
     if (!response.ok) {
-      const body = await response.text().catch(() => '');
       throw new Error(`Webhook HTTP ${response.status}: ${body.slice(0, 300)}`);
     }
     lastWebhookError = '';
+    log('Webhook enviado ao Flask:', response.status, message?.from || '', String(message?.body || '').slice(0, 80));
   } catch (err) {
     lastWebhookError = err?.message || String(err);
     log('Falha ao enviar webhook para Flask:', lastWebhookError);
@@ -367,10 +410,22 @@ async function startWhatsApp(io) {
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (!Array.isArray(messages) || type !== 'notify') return;
       for (const msg of messages) {
+        rawMessageEvents += 1;
         const normalized = normalizeIncomingMessage(msg);
-        if (normalized.fromMe || normalized.isSentByMe) continue;
-        if (!normalized.body && normalized.type === 'unknown') continue;
+        if ((normalized.fromMe || normalized.isSentByMe) && !FORWARD_FROM_ME) {
+          ignoredFromMeMessages += 1;
+          rememberInbound(normalized, { ignored: 'from_me' });
+          log('Mensagem ignorada porque veio do próprio WhatsApp conectado:', normalized.from, String(normalized.body || '').slice(0, 80));
+          continue;
+        }
+        if (!normalized.body && normalized.type === 'unknown') {
+          ignoredEmptyMessages += 1;
+          rememberInbound(normalized, { ignored: 'empty_unknown' });
+          continue;
+        }
         receivedMessages += 1;
+        rememberInbound(normalized, { forwarded_to_webhook: Boolean(WEBHOOK_URL) });
+        log('Mensagem recebida:', normalized.from, 'chat:', normalized.chatId, 'type:', normalized.type, 'body:', String(normalized.body || '').slice(0, 120));
         await postWebhook(normalized);
       }
       emitState(io);
@@ -517,6 +572,49 @@ app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.get(['/healthz', '/healthz/'], (_req, res) => res.json({ ok: true, service: 'openwa-compatible-baileys-gateway', engine: 'baileys', session_id: SESSION_ID }));
 app.get(['/readyz', '/readyz/'], (_req, res) => res.status(connectionState === 'READY' ? 200 : 503).json(publicState()));
 app.get(['/qr-state', '/qr-state/'], (_req, res) => res.json({ ...publicState(), qrcode: lastQr, raw_qr: lastRawQr, pairing_code: lastPairingCode }));
+
+app.get('/debug/inbox', requireApiKey, (req, res) => {
+  res.json({
+    ...publicState(),
+    webhook_url_configured: Boolean(WEBHOOK_URL),
+    webhook_secret_configured: Boolean(WEBHOOK_SECRET),
+    api_key_configured: Boolean(API_KEY),
+    webhook_url_preview: WEBHOOK_URL ? WEBHOOK_URL.replace(/^https?:\/\//, '').slice(0, 90) : '',
+    api_key_preview: redact(API_KEY),
+    recent_inbound: recentInbound,
+  });
+});
+
+app.post('/test-webhook', requireApiKey, async (req, res) => {
+  const to = req.body?.from || req.body?.wa_id || req.query.from || '5511999999999@c.us';
+  const body = req.body?.body || req.body?.text || req.query.body || 'Teste manual de webhook';
+  const jid = String(to).includes('@') ? String(to) : `${String(to).replace(/\D/g, '')}@c.us`;
+  const fake = {
+    id: `test-${Date.now()}`,
+    messageId: `test-${Date.now()}`,
+    from: jid,
+    chatId: jid,
+    body: String(body),
+    text: String(body),
+    caption: String(body),
+    type: 'text',
+    timestamp: Math.floor(Date.now() / 1000),
+    t: Math.floor(Date.now() / 1000),
+    isGroupMsg: false,
+    isGroup: false,
+    fromMe: false,
+    isSentByMe: false,
+    notifyName: 'Teste Webhook',
+    senderName: 'Teste Webhook',
+    sender: { id: jid, pushname: 'Teste Webhook', name: 'Teste Webhook' },
+    raw: { source: 'manual_test_webhook' },
+  };
+  rememberInbound(fake, { manual_test: true, forwarded_to_webhook: Boolean(WEBHOOK_URL) });
+  receivedMessages += 1;
+  await postWebhook(fake);
+  emitState(io);
+  res.json({ ok: !lastWebhookError, state: publicState(), sent_payload: fake });
+});
 app.get(['/', '/qr', '/login'], (_req, res) => res.set('cache-control', 'no-store').type('html').send(qrPageHtml()));
 app.get(['/api-docs', '/docs'], (_req, res) => res.type('html').send(docsHtml()));
 
