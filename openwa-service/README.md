@@ -1,66 +1,54 @@
-# Serviço OpenWA no Railway
+# OpenWA no Railway
 
-Este diretório roda o OpenWA/EASY API como um service separado do Flask.
+Este serviço roda o OpenWA/EASY API separado do Flask.
 
-## Service no Railway
+## Arquivos importantes
 
-Crie um service `openwa-api` usando:
+- `openwa-service/Dockerfile`: imagem do serviço OpenWA.
+- `openwa-service/start-openwa.sh`: inicialização, webhook, sessão persistente e proxy.
+- `openwa-service/health-proxy.js`: responde `/healthz` para o Railway e repassa o restante para a EASY API.
+- `openwa-service/package.json`: fixa `@open-wa/wa-automate@4.76.0` no build.
 
-```env
-RAILWAY_DOCKERFILE_PATH=openwa-service/Dockerfile
-```
+## Por que existe `health-proxy.js`?
+
+O `railway.json` do projeto usa `healthcheckPath: /healthz`, que funciona no Flask.
+O OpenWA/EASY API não expõe `/healthz` por padrão. Sem o proxy, o Railway marca o deploy como unhealthy mesmo quando o OpenWA está iniciando corretamente.
+
+O proxy escuta na porta pública do Railway (`PORT`, normalmente `8080`) e repassa as chamadas reais para o OpenWA rodando internamente em `OPENWA_INTERNAL_PORT` (`8081`).
 
 ## Variáveis obrigatórias
 
 ```env
-OPENWA_API_KEY=crie-uma-chave-grande
+OPENWA_API_KEY=troque-por-uma-chave-forte
 OPENWA_SESSION_ID=lanhouse-demo
 OPENWA_PUBLIC_URL=https://SEU-OPENWA.up.railway.app
 FLASK_WEBHOOK_URL=https://SEU-FLASK.up.railway.app/webhooks/openwa
-OPENWA_WEBHOOK_SECRET=o-mesmo-segredo-configurado-no-flask
+OPENWA_WEBHOOK_SECRET=o-mesmo-segredo-do-flask
 ```
 
-Opcional:
+## Volume
 
-```env
-OPENWA_LOG_STDERR_TO_STDOUT=true
+Monte o volume do Railway exatamente em:
+
+```txt
+/data
 ```
 
-Essa variável fica `true` por padrão porque o OpenWA escreve várias mensagens normais no `stderr`; no Railway elas aparecem como `[err]`, mesmo quando não existe erro real.
-
-## Volume obrigatório
-
-Monte um **Volume exatamente em `/data`** no service `openwa-api`.
-
-A sessão fica em:
+A sessão será salva em:
 
 ```txt
 /data/sessions
 ```
 
-O log correto deve mostrar algo como:
+## Testes rápidos
+
+Após o deploy:
 
 ```txt
-Data dir: /data/sessions/_IGNORE_lanhouse-demo
+https://SEU-OPENWA.up.railway.app/healthz
+https://SEU-OPENWA.up.railway.app/readyz
+https://SEU-OPENWA.up.railway.app/api-docs
 ```
 
-Se aparecer `./_IGNORE_lanhouse-demo`, você ainda está rodando uma imagem antiga ou não aplicou estes arquivos.
-
-## Primeiro deploy
-
-1. Faça redeploy do `openwa-api`.
-2. Abra a URL pública do OpenWA.
-3. Escaneie o QR Code.
-4. Depois de escanear, mantenha o serviço ligado por pelo menos 5 minutos.
-5. Só depois faça novo deploy/restart.
-
-Antes de escanear, é normal aparecer que não existe sessão salva. Isso não é crash.
-
-## O que esta versão corrige
-
-- Não baixa `@open-wa/wa-automate` no boot; instala no build.
-- Força `sessionDataPath=/data/sessions`.
-- Garante que `/data` está gravável antes de iniciar.
-- Cria a pasta `_IGNORE_<sessão>` antes do OpenWA iniciar.
-- Redireciona logs normais de `stderr` para `stdout` para evitar falso `[err]` no Railway.
-- Mantém o config em `/app/config/cli.config.json`, fora do volume, evitando novos problemas de permissão.
+`/healthz` deve responder mesmo antes do QR Code.  
+`/readyz` só responde `ok: true` quando a EASY API interna estiver aceitando conexão.

@@ -5,7 +5,8 @@ DATA_DIR="${OPENWA_DATA_DIR:-/data}"
 SESSION_DATA_DIR="${OPENWA_SESSION_DATA_DIR:-${DATA_DIR}/sessions}"
 CONFIG_DIR="/app/config"
 CONFIG_FILE="${CONFIG_DIR}/cli.config.json"
-PORT="${PORT:-8080}"
+PUBLIC_PORT="${PORT:-8080}"
+OPENWA_INTERNAL_PORT="${OPENWA_INTERNAL_PORT:-8081}"
 SESSION_ID="${OPENWA_SESSION_ID:-default}"
 
 : "${OPENWA_API_KEY:?OPENWA_API_KEY precisa estar configurada no Railway}"
@@ -57,7 +58,19 @@ if [ ! -f "${SESSION_DATA_DIR}/${SESSION_ID}.data.json" ]; then
   echo "Depois de escanear, mantenha o serviço ligado por pelo menos 5 minutos antes de reiniciar."
 fi
 
-echo "Iniciando OpenWA na porta ${PORT}, sessão ${SESSION_ID}, sessionDataPath ${SESSION_DATA_DIR}"
+# O railway.json do projeto usa /healthz para o Flask.
+# Este proxy faz /healthz existir também no service OpenWA e repassa o restante para a EASY API.
+export OPENWA_INTERNAL_HOST="${OPENWA_INTERNAL_HOST:-127.0.0.1}"
+export OPENWA_INTERNAL_PORT
+node /app/health-proxy.js &
+PROXY_PID="$!"
+
+cleanup() {
+  kill "$PROXY_PID" 2>/dev/null || true
+}
+trap cleanup INT TERM EXIT
+
+echo "Iniciando OpenWA interno na porta ${OPENWA_INTERNAL_PORT}, proxy público na porta ${PUBLIC_PORT}, sessão ${SESSION_ID}, sessionDataPath ${SESSION_DATA_DIR}"
 
 # Importante: o OpenWA escreve várias mensagens normais no stderr.
 # No Railway isso aparece como [err], mesmo sem crash. Por padrão redirecionamos stderr para stdout
@@ -66,7 +79,7 @@ if [ "${OPENWA_LOG_STDERR_TO_STDOUT:-true}" = "true" ]; then
   # shellcheck disable=SC2086
   exec /app/node_modules/.bin/wa-automate \
     --config "$CONFIG_FILE" \
-    --port "$PORT" \
+    --port "$OPENWA_INTERNAL_PORT" \
     --key "$OPENWA_API_KEY" \
     --session-id "$SESSION_ID" \
     $PUBLIC_ARGS \
@@ -77,7 +90,7 @@ else
   # shellcheck disable=SC2086
   exec /app/node_modules/.bin/wa-automate \
     --config "$CONFIG_FILE" \
-    --port "$PORT" \
+    --port "$OPENWA_INTERNAL_PORT" \
     --key "$OPENWA_API_KEY" \
     --session-id "$SESSION_ID" \
     $PUBLIC_ARGS \
